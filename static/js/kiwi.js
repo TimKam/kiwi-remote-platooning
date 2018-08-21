@@ -13,6 +13,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 corners = [];
+previousRectSize = undefined; // rect size of the latest "frame"
+cycleCounter = 0; // to get average of four cycles and ignore outlier rects
+previousRectSizes = [] // rect sizes of current cycle set
 var g_ws;
 var g_libcluon;
 var g_recording = false;
@@ -295,6 +298,7 @@ function setupUI() {
                 const width = mouseX - startX;
                 const height = mouseY - startY;
                 rect.spec = [startX, startY, width, height];
+                previousRectSize = [width, height];
                 // define global object to specify user-defined scope:
                 drawRect();
                 canvas.style.cursor = "default";
@@ -356,25 +360,50 @@ function setupUI() {
                     jsfeat.optical_flow_lk.track(prev_img_pyr, curr_img_pyr, prev_xy, curr_xy, point_count, 20, 30, point_status, 0.01, 0.001);
                     prune_oflow_points(context);
                     var pointInScopeCounter = 0;
-                    let pointSum = [];
+                    let pointSum = [0, 0];
                     for (var i = 0; i < curr_xy.length; i += 2) {
+                        // don't include points that enlarge rect more than 5% per step in any direction:
+                        let xTooFarOff = false;
+                        let yTooFarOff = false;
+                        if (previousRectSize) {
+                            const previousRectSizeOffSet = previousRectSize * 0.05;
+                            xTooFarOff =
+                                curr_xy[i] < previousRectSize - previousRectSizeOffSet ||
+                                curr_xy[i] > previousRectSize + previousRectSizeOffSet;
+                            yTooFarOff =
+                                curr_xy[i + 1] < previousRectSize - previousRectSizeOffSet ||
+                                curr_xy[i + 1] > previousRectSize + previousRectSizeOffSet;
+                        }
+                        if (xTooFarOff || yTooFarOff) {
+                            continue;
+                        }
                         pointSum = [pointSum[0] + curr_xy[i], pointSum[1] + curr_xy[i + 1]];
                         pointInScopeCounter++;
                     }
+                    // console.log(pointSum);
                     const centroid = [pointSum[0] / pointInScopeCounter, pointSum[1] / pointInScopeCounter];
-                    console.log(centroid);
+                    // console.log(centroid);
                     const rectSize = determineBoxSize(curr_xy);
+                    previousRectSizes.push(rectSize);
                     context.fillStyle = '#00ff00';
                     context.fillRect(...centroid, 10, 10);
+                    context.strokeStyle = '#ccc';
                     context.fillStyle = '#f00';
+                    if (cycleCounter === 3) {
+                        context.lineWidth = 5;
+                        context.strokeStyle = '#00ff00';
+                        let includedRects = 0;
+                        // const sumRectSizes = previousRectSizes.reduce(rectSize => {});
+                        // const averageRectSize = [sumRectSizes[0] / includedRects, sumRectSizes[1] / includedRects];
+                        previousRectSizes = [];
+                    }
                     const topX = centroid [0] - (rectSize[0]) / 2;
                     const topY = centroid [1] - (rectSize[1]) / 2;
                     context.beginPath();
                     context.rect(topX, topY, rectSize[0], rectSize[1]);
-                    context.lineWidth=5;
-                    context.strokeStyle="#00ff00";
                     context.stroke();
-                    context.lineWidth=1;
+                    context.lineWidth = 1;
+                    previousRectSize = rectSize;
                     // console.log(curr_xy);
                   }
                   for (var i = 0; i < corners.length; i += 2) {
@@ -404,9 +433,10 @@ function setupUI() {
                         }  
 
                     }
+                    cycleCounter === 3? cycleCounter = 0 : cycleCounter++;
                   }
                 };
-                featureFinder = setInterval(doFindFeatures, 20);
+                featureFinder = setInterval(doFindFeatures, 25);
                 // var gui = new dat.GUI();
                 // gui.add(window, 'fastThreshold', 0, 100).onChange(doFindFeatures);
             } else {
