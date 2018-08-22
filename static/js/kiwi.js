@@ -15,6 +15,7 @@
 corners = [];
 previousRectSize = undefined; // rect size of the latest "frame"
 cycleCounter = 0; // to get average of four cycles and ignore outlier rects
+cycleSetLength = 10;
 previousRectSizes = [] // rect sizes of current cycle set
 var g_ws;
 var g_libcluon;
@@ -361,12 +362,14 @@ function setupUI() {
                     prune_oflow_points(context);
                     var pointInScopeCounter = 0;
                     let pointSum = [0, 0];
+                    filteredPoints = [];
+                    // const initialRectSize = determineBoxSize(curr_xy);
                     for (var i = 0; i < curr_xy.length; i += 2) {
                         // don't include points that enlarge rect more than 5% per step in any direction:
-                        let xTooFarOff = false;
+                         /*let xTooFarOff = false;
                         let yTooFarOff = false;
                         if (previousRectSize) {
-                            const previousRectSizeOffSet = previousRectSize * 0.05;
+                            const previousRectSizeOffSet = previousRectSize * 0.01;
                             xTooFarOff =
                                 curr_xy[i] < previousRectSize - previousRectSizeOffSet ||
                                 curr_xy[i] > previousRectSize + previousRectSizeOffSet;
@@ -374,22 +377,34 @@ function setupUI() {
                                 curr_xy[i + 1] < previousRectSize - previousRectSizeOffSet ||
                                 curr_xy[i + 1] > previousRectSize + previousRectSizeOffSet;
                         }
-                        if (xTooFarOff || yTooFarOff) {
+                       if (xTooFarOff || yTooFarOff) {
                             continue;
-                        }
+                        }*/
+                        filteredPoints.push(curr_xy[i]);
+                        filteredPoints.push(curr_xy[i + 1]);
                         pointSum = [pointSum[0] + curr_xy[i], pointSum[1] + curr_xy[i + 1]];
                         pointInScopeCounter++;
                     }
                     // console.log(pointSum);
                     const centroid = [pointSum[0] / pointInScopeCounter, pointSum[1] / pointInScopeCounter];
                     // console.log(centroid);
-                    const rectSize = determineBoxSize(curr_xy);
+                    const dists = [];
+                    for (var i = 0; i < filteredPoints.length; i += 2) {
+                        dists.push(Math.sqrt(Math.pow((filteredPoints[i] - centroid[0]), 2) + Math.pow(filteredPoints[i+1] - centroid[1], 2)));
+                    }
+                    for (var i = 1; i < dists.length * 0.05; i += 1) {
+                        const maxIndex = dists.indexOf(Math.max(...dists));
+                        dists[maxIndex] = 0;
+                        filteredPoints[maxIndex * 2] = centroid[0];
+                        filteredPoints[maxIndex * 2 + 1] = centroid[1];
+                    }
+                    const rectSize = determineBoxSize(filteredPoints);
                     previousRectSizes.push(rectSize);
                     context.fillStyle = '#00ff00';
                     context.fillRect(...centroid, 10, 10);
                     context.strokeStyle = '#ccc';
                     context.fillStyle = '#f00';
-                    if (cycleCounter === 3) {
+                    if (cycleCounter === cycleSetLength) {
                         context.lineWidth = 5;
                         context.strokeStyle = '#00ff00';
                         let includedRects = 0;
@@ -397,10 +412,14 @@ function setupUI() {
                         // const averageRectSize = [sumRectSizes[0] / includedRects, sumRectSizes[1] / includedRects];
                         previousRectSizes = [];
                     }
-                    const topX = centroid [0] - (rectSize[0]) / 2;
-                    const topY = centroid [1] - (rectSize[1]) / 2;
+                    // const topX = centroid [0] - (rectSize[0]) / 2;
+                    // const topY = centroid [1] - (rectSize[1]) / 2;
+                    const topLeft = determineTopLeftCorner(filteredPoints) // ????
+                    if (cycleCounter === cycleSetLength) {
+                        // corners = tracking.Fast.findCorners(gray, width, height);
+                    }
                     context.beginPath();
-                    context.rect(topX, topY, rectSize[0], rectSize[1]);
+                    context.rect(...topLeft, ...rectSize);
                     context.stroke();
                     context.lineWidth = 1;
                     previousRectSize = rectSize;
@@ -424,16 +443,20 @@ function setupUI() {
                                             corners[i + 1] < rect.spec[1] + rect.spec[3];
                         if (isInXScope && isInYScope) {
                             pointSum = [pointSum[0] + corners[i], pointSum[1] + corners[i + 1]];
-                            context.fillStyle = '#0000ff';
+                            context.fillStyle = '#CCC';
                             context.fillRect(corners[i], corners[i + 1], 3, 3);
                             pointInScopeCounter++;
                             curr_xy[point_count<<1] = corners[i];
                             curr_xy[(point_count<<1)+1] = corners[i + 1];
                             point_count++;
-                        }  
+                        }
 
                     }
-                    cycleCounter === 3? cycleCounter = 0 : cycleCounter++;
+                    for (var i = 0; i < filteredPoints.length; i += 2) {
+                        context.fillStyle = '#0000ff';
+                        context.fillRect(filteredPoints[i], filteredPoints[i + 1], 3, 3);
+                    }
+                    cycleCounter === cycleSetLength? cycleCounter = 0 : cycleCounter++;
                   }
                 };
                 featureFinder = setInterval(doFindFeatures, 25);
@@ -884,12 +907,30 @@ function draw_circle(context, x, y) {
     context.fill();
 }
 
+/*function determineCenter(points) {
+    const topLeft = determineTopLeftCorner(points)
+    const boxSize = determineBoxSize(points);
+    return [
+        topLeft[0] + boxSize[0] / 2,
+        topLeft[1] + boxSize[1] / 2
+    ]
+}*/
+
+function determineTopLeftCorner(points) {
+    let topLeft = [1000, 1000]
+    for (i = 0; i < points.length; i=i+2) {
+        topLeft[0]=Math.min(points[i],topLeft[0]) 
+		topLeft[1]=Math.min(points[i+1],topLeft[1])
+    }
+    return topLeft
+}
+
 function determineBoxSize(points)  {
 
-	var minY=1000
-	var maxY=-1
-	var minX=1000
-	var maxX=-1
+	var minY=100000
+	var maxY=-100000
+	var minX=100000
+	var maxX=-100000
 	
 	for (i = 0; i < points.length; i=i+2) { 
 		minY=Math.min(points[i+1],minY)
@@ -899,7 +940,7 @@ function determineBoxSize(points)  {
 		maxX=Math.max(points[i],maxX)
 	}
 	
-	return[maxY-minY,maxX-minX]
+	return[maxX-minX, maxY-minY]
 
 }
 
