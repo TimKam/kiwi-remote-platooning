@@ -250,6 +250,14 @@
                                 <button id="platooning-button" type="button" class="fas fa-toggle-off" style="font-size:20px;color:#555;padding: 5px 30px;" title="Start platooning."></button>
                                 </td>
                                 </tr>
+                                <tr>
+                                <td>
+                                Run:
+                                </td>
+                                <td>
+                                <button id="run-button" type="button" class="fas fa-toggle-off" style="font-size:20px;color:#555;padding: 5px 30px;" title="Runs controller."></button>
+                                </td>
+                                </tr>
                                 </table>
 {{/if}}
 
@@ -315,7 +323,8 @@
             <br>
             <br>
             <br>
-            <div id="editor">// Access sensor values.
+            <div id="editor">
+<!--                // Access sensor values.
 const frontSensor = perception.front;
 const rearSensor = perception.rear;
 const leftSensor = perception.left;
@@ -325,7 +334,13 @@ const rightSensor = perception.right;
 
 // Set values to access Kiwi's motor and steering.
 actuation.motor = 0;
-actuation.steering = 0.3;
+actuation.steering = 0.3;-->
+// centroid, deviation
+
+controlReq(window.centroid, window.deviation,-0.3,0.018,0.002,0.0015,0.01,0)
+
+groundSteering = window.steeringReq;
+pedalPosition = window.PedalPosReq;
 </div>
         </div>
     </div>

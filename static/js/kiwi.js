@@ -12,10 +12,13 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
+controllerParams={};
+window.controllerRuninng = false;
+PointArrayLength = 100;
 corners = [];
 previousRectSize = undefined; // rect size of the latest "frame"
 cycleCounter = 0; // to get average of four cycles and ignore outlier rects
-cycleSetLength = 10;
+cycleSetLength = 5;
 previousRectSizes = [] // rect sizes of current cycle set
 var g_ws;
 var g_libcluon;
@@ -54,7 +57,8 @@ function setupUI() {
     }
 
     if ("WebSocket" in window) {
-        g_ws = new WebSocket("ws://" + "kiwi.opendlv.io" + "/", "od4");
+        const wsAddress = "192.168.1.195:8081"; //
+        g_ws = new WebSocket("ws://" + wsAddress + "/", "od4");
         g_ws.binaryType = 'arraybuffer';
 
         g_ws.onopen = function() {
@@ -323,8 +327,10 @@ function setupUI() {
                 $("#platooning-button").removeClass("fas fa-toggle-off").addClass("fas fa-toggle-on");
                 $("#platooning-button").css("color", "#3CB371");
                 // get canvas
-                const width = canvas.width;
-                const height = canvas.height;
+                canvasWidth = canvas.width;
+                canvasHeight = canvas.height;
+                const width = canvasWidth;
+                const height = canvasHeight;
                 const image = document.getElementById('screenshot');
                 window.fastThreshold = 50;
                 // initiate Lucas-Kanade
@@ -333,9 +339,9 @@ function setupUI() {
                 curr_img_pyr.allocate(width, height, jsfeat.U8_t|jsfeat.C1_t);
                 prev_img_pyr.allocate(width, height, jsfeat.U8_t|jsfeat.C1_t);
                 point_count = 0;
-                point_status = new Uint8Array(100);
-                prev_xy = new Float32Array(100*2);
-                curr_xy = new Float32Array(100*2);
+                point_status = new Uint8Array(PointArrayLength);
+                prev_xy = new Float32Array(PointArrayLength*2);
+                curr_xy = new Float32Array(PointArrayLength*2);
                 // feature update function
                 const doFindFeatures = () => {
                   tracking.Fast.THRESHOLD = window.fastThreshold;
@@ -343,7 +349,6 @@ function setupUI() {
                   const imageData = context.getImageData(0, 0, width, height);
                   const gray = tracking.Image.grayscale(imageData.data, width, height);
                   if (initiateFeatures == true) { // find good features to track
-                    initiateFeatures = false;
                     corners = tracking.Fast.findCorners(gray, width, height);
                   } else {
                     // run Lucas-Kanade step:
@@ -362,7 +367,7 @@ function setupUI() {
                     prune_oflow_points(context);
                     var pointInScopeCounter = 0;
                     let pointSum = [0, 0];
-                    filteredPoints = [];
+                    filteredPoints = curr_xy;
                     // const initialRectSize = determineBoxSize(curr_xy);
                     for (var i = 0; i < curr_xy.length; i += 2) {
                         // don't include points that enlarge rect more than 5% per step in any direction:
@@ -380,24 +385,44 @@ function setupUI() {
                        if (xTooFarOff || yTooFarOff) {
                             continue;
                         }*/
-                        filteredPoints.push(curr_xy[i]);
-                        filteredPoints.push(curr_xy[i + 1]);
+                        /*filteredPoints.push(curr_xy[i]);
+                        filteredPoints.push(curr_xy[i + 1]);*/
                         pointSum = [pointSum[0] + curr_xy[i], pointSum[1] + curr_xy[i + 1]];
                         pointInScopeCounter++;
                     }
                     // console.log(pointSum);
-                    const centroid = [pointSum[0] / pointInScopeCounter, pointSum[1] / pointInScopeCounter];
-                    // console.log(centroid);
-                    const dists = [];
-                    for (var i = 0; i < filteredPoints.length; i += 2) {
-                        dists.push(Math.sqrt(Math.pow((filteredPoints[i] - centroid[0]), 2) + Math.pow(filteredPoints[i+1] - centroid[1], 2)));
-                    }
-                    for (var i = 1; i < dists.length * 0.05; i += 1) {
+                    // determine median point:
+                    /* xs = []
+                    ys = []*/
+                    /*for (var i = 1; i < dists.length * 0.02; i += 1) {
                         const maxIndex = dists.indexOf(Math.max(...dists));
                         dists[maxIndex] = 0;
                         filteredPoints[maxIndex * 2] = centroid[0];
                         filteredPoints[maxIndex * 2 + 1] = centroid[1];
+                    }*/
+                    const centroid = [pointSum[0] / pointInScopeCounter, pointSum[1] / pointInScopeCounter];
+                    // console.log(centroid);
+                    const dists = [];
+                    for (var i = 0; i < filteredPoints.length; i += 2) {
+                        dists.push(Math.sqrt(Math.pow(filteredPoints[i] - centroid[0], 2) + Math.pow(filteredPoints[i+1] - centroid[1], 2)));
                     }
+                    /*for (var i = 1; i < dists.length * 0.01; i += 1) {
+                        const maxIndex = dists.indexOf(Math.max(...dists));
+                        dists[maxIndex] = 0;
+                        filteredPoints[maxIndex * 2] = centroid[0];
+                        filteredPoints[maxIndex * 2 + 1] = centroid[1];
+                    }*/
+                    const deviationDists = dists.slice(0);
+                    filteredPointsWOOffsets = filteredPoints.slice(0);
+                    for (var i = 1; i < deviationDists.length * 0.3; i += 1) {
+                        const maxIndex = dists.indexOf(Math.max(...deviationDists));
+                        deviationDists[maxIndex] = 0;
+                        filteredPointsWOOffsets[maxIndex * 2] = NaN;
+                        filteredPointsWOOffsets[maxIndex * 2 + 1] = NaN;
+                    }
+                    const deviation = deviationDists.reduce((a, b) => a + b, 0) / deviationDists.length;
+                    // console.log(deviation);
+                    setControls(centroid, deviation);
                     const rectSize = determineBoxSize(filteredPoints);
                     previousRectSizes.push(rectSize);
                     context.fillStyle = '#00ff00';
@@ -405,8 +430,8 @@ function setupUI() {
                     context.strokeStyle = '#ccc';
                     context.fillStyle = '#f00';
                     if (cycleCounter === cycleSetLength) {
-                        context.lineWidth = 5;
-                        context.strokeStyle = '#00ff00';
+                        // context.lineWidth = 5;
+                        // context.strokeStyle = '#00ff00';
                         let includedRects = 0;
                         // const sumRectSizes = previousRectSizes.reduce(rectSize => {});
                         // const averageRectSize = [sumRectSizes[0] / includedRects, sumRectSizes[1] / includedRects];
@@ -421,6 +446,17 @@ function setupUI() {
                     context.beginPath();
                     context.rect(...topLeft, ...rectSize);
                     context.stroke();
+                    /**** draw rect without outliers ****/
+                    const rectSizeWo = determineBoxSize(filteredPointsWOOffsets.filter(point => !isNaN(point)));
+                    context.fillStyle = '#00ff00';
+                    context.fillRect(...centroid, 10, 10);
+                    context.lineWidth = 5;
+                    context.strokeStyle = '#00ff00';
+                    const topLeftWo = determineTopLeftCorner(filteredPointsWOOffsets.filter(point => !isNaN(point)));
+                    context.beginPath();
+                    context.rect(...topLeftWo, ...rectSizeWo);
+                    context.stroke();
+                    //**** reset line width ****/
                     context.lineWidth = 1;
                     previousRectSize = rectSize;
                     // console.log(curr_xy);
@@ -432,7 +468,8 @@ function setupUI() {
                   // update scope (rectangle) if defined:
                   if (rect.spec) {
                     // determine centroid
-                    let pointSum = [0, 0];
+                    initiateFeatures = false;
+                    //let pointSum = [0, 0];
                     let pointInScopeCounter = 0;
                     for (var i = 0; i < corners.length; i += 2) {
                         // console.log(corners[i] + "," + corners[i + 1]);
@@ -442,9 +479,9 @@ function setupUI() {
                         const isInYScope =  corners[i + 1] > rect.spec[1] &&
                                             corners[i + 1] < rect.spec[1] + rect.spec[3];
                         if (isInXScope && isInYScope) {
-                            pointSum = [pointSum[0] + corners[i], pointSum[1] + corners[i + 1]];
-                            context.fillStyle = '#CCC';
-                            context.fillRect(corners[i], corners[i + 1], 3, 3);
+                            //pointSum = [pointSum[0] + corners[i], pointSum[1] + corners[i + 1]];
+                            // context.fillStyle = '#CCC';
+                            // context.fillRect(corners[i], corners[i + 1], 3, 3);
                             pointInScopeCounter++;
                             curr_xy[point_count<<1] = corners[i];
                             curr_xy[(point_count<<1)+1] = corners[i + 1];
@@ -453,13 +490,18 @@ function setupUI() {
 
                     }
                     for (var i = 0; i < filteredPoints.length; i += 2) {
-                        context.fillStyle = '#0000ff';
+                        if (isNaN(filteredPointsWOOffsets[i])) {
+                            context.fillStyle = '#ccc';
+                        } else {
+                            context.fillStyle = '#0000ff';
+                        }
+                        
                         context.fillRect(filteredPoints[i], filteredPoints[i + 1], 3, 3);
                     }
                     cycleCounter === cycleSetLength? cycleCounter = 0 : cycleCounter++;
                   }
                 };
-                featureFinder = setInterval(doFindFeatures, 25);
+                featureFinder = setInterval(doFindFeatures, 50);
                 // var gui = new dat.GUI();
                 // gui.add(window, 'fastThreshold', 0, 100).onChange(doFindFeatures);
             } else {
@@ -944,3 +986,94 @@ function determineBoxSize(points)  {
 
 }
 
+function setControls(centroid, deviation) {
+    window.centroid = centroid;
+    window.deviation = deviation;
+    let groundSteering = window.steeringReq || 0;
+    let pedalPosition = window.PedalPosReq || 0;
+    const editor = ace.edit("editor");
+    controllerCode = editor.getValue();
+    eval(controllerCode);
+    console.log(`Centroid: ${centroid}, Deviation: ${deviation}`);
+    console.log(`Pedal position: ${pedalPosition}, Steering position: ${groundSteering}`);
+    const groundSteeringRequest = `{\"groundSteering\":${groundSteering}}`;
+    const envGroundSteeringRequest = g_libcluon.encodeEnvelopeFromJSONWithSampleTimeStamp(groundSteeringRequest, 1090 /* message identifier */, 0 /* sender stamp */);
+
+    const pedalPositionRequest = `{\"position\":${pedalPosition}`;
+    const envPedalPositionRequest = g_libcluon.encodeEnvelopeFromJSONWithSampleTimeStamp(pedalPositionRequest, 1086 /* message identifier */, 0 /* sender stamp */);
+
+    const actuationRequest = "{\"acceleration\":0,\"steering\":0,\"isValid\":false}";
+    const envActuationRequest = g_libcluon.encodeEnvelopeFromJSONWithSampleTimeStamp(actuationRequest, 160 /* message identifier */, 0 /* sender stamp */);
+
+    var actuationCommands = "{\"virtualjoystick\":" +
+                                    "{" +
+                                        "\"pedalPositionRequest\":" + "\"" + window.btoa(envPedalPositionRequest) + "\"," +
+                                        "\"groundSteeringRequest\":" + "\"" + window.btoa(envGroundSteeringRequest) + "\"," +
+                                        "\"actuationRequest\":" + "\"" + window.btoa(envActuationRequest) + "\"" +
+                                    "}" +
+                                "}";
+    g_ws.send(actuationCommands);
+};
+
+function controlReq(track, dist,Psteer,Ppedal,Ipedal,Dpedal,dt,resetIntegral) {
+    
+    var PedalPosReq=0
+    var steeringReq=0
+    if(window.controllerRuninng){
+        if(resetIntegral===1){
+            controllerParams.integral=0
+        }
+
+        if (controllerParams.prevDist) {
+            error=-(dist-controllerParams.targetDist)
+
+            let PedalPosReqPpart=Ppedal*error
+            let derivative=(error-controllerParams.prevError)/dt
+            controllerParams.integral=controllerParams.integral+error*dt
+            let PedalPosReqDpart=Dpedal*derivative
+            let PedalPosReqIpart=controllerParams.integral*Ipedal
+
+            PedalPosReq=PedalPosReqPpart+PedalPosReqIpart+PedalPosReqDpart
+
+            controllerParams.prevDist=dist
+            controllerParams.prevError=error
+
+            let normalizeDistToCenter=2*(track[0]-(canvasWidth/2))/canvasWidth
+
+            if(PedalPosReq>=0.07){
+                steeringReq=Psteer*normalizeDistToCenter
+            }else if(PedalPosReq<=-0.07){
+                steeringReq=-Psteer*normalizeDistToCenter
+            }else{
+                steeringReq=0
+            }
+            console.log(controllerParams)
+        } else {
+            controllerParams.integral=0
+            controllerParams.prevDist=dist
+            controllerParams.targetDist=dist
+            controllerParams.prevError=0
+
+        /*	controllerParams.Psteer=0.3
+            controllerParams.Ppedal=0.3
+            controllerParams.Dpedal=0 */
+        // controllerParams.dt=0.1
+        }
+    }
+    window.PedalPosReq = PedalPosReq
+    window.steeringReq = steeringReq
+    return [PedalPosReq,steeringReq]
+}
+
+document.getElementById("run-button").addEventListener("click", function( event ) {
+    if(!window.controllerRuninng){
+        window.controllerRuninng = true;
+       $('#run-button').removeClass('fas fa-toggle-off').addClass('fas fa-toggle-on');
+       $('#run-button').css('color', '#3CB371');
+    } else {
+        window.controllerRuninng = false;
+        $('#run-button').removeClass('fas fa-toggle-on').addClass('fas fa-toggle-off');
+        $('#run-button').css('color', '#555');
+    }
+                                
+});
